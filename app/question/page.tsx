@@ -10,54 +10,58 @@ export default function QuestionPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const [question, setQuestion] = useState("");
+  const [questionIndex, setQuestionIndex] = useState(0);
   const [answer, setAnswer] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const hasRequested = useRef(false);
+  const [totalQuestions, setTotalQuestions] = useState(1);
 
   // script는 localStorage에서만 읽음
   useEffect(() => {
     if (hasRequested.current || question) return;
-    let script = "";
+    let questions: string[] = [];
+    let idx = 0;
     if (typeof window !== "undefined") {
-      script = localStorage.getItem("presentation_script") ?? "";
+      const qlist = localStorage.getItem("question_list");
+      if (qlist) questions = JSON.parse(qlist);
+      const search = new URLSearchParams(window.location.search);
+      idx = parseInt(search.get("index") ?? "0", 10);
     }
-    if (!script) {
+    if (!questions.length) {
+      setError("질문 목록이 없습니다. 처음부터 다시 시작해 주세요.");
       router.replace("/");
       return;
     }
-    setLoading(true);
-    setError("");
+    if (idx >= questions.length) {
+      // 모든 질문이 끝났을 때 결과 페이지 등으로 이동
+      router.replace("/");
+      return;
+    }
+    setQuestion(questions[idx]);
+    setQuestionIndex(idx);
     hasRequested.current = true;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10000); // 10초
-
-    fetch("/api/gemini-question", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ script }),
-      signal: controller.signal,
-    })
-      .then(res => {
-        if (!res.ok) throw new Error("질문 생성에 실패했습니다.");
-        return res.json();
-      })
-      .then(data => setQuestion(data.question))
-      .catch(err => setError("질문 생성에 실패했습니다. 다시 시도해 주세요."))
-      .finally(() => {
-        setLoading(false);
-        clearTimeout(timeout);
-      });
-
-    return () => clearTimeout(timeout);
   }, [question, router]);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const qlist = localStorage.getItem("question_list");
+      if (qlist) setTotalQuestions(JSON.parse(qlist).length);
+    }
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!answer.trim()) return;
     setLoading(true);
-    // 평가 요청 없이 화면 이동만 수행
-    router.push(`/evaluate?question=${encodeURIComponent(question)}&answer=${encodeURIComponent(answer)}`);
+    // qa_history 누적
+    let qaHistory = [];
+    if (typeof window !== "undefined") {
+      qaHistory = JSON.parse(localStorage.getItem("qa_history") ?? "[]");
+      qaHistory.push({ question, answer });
+      localStorage.setItem("qa_history", JSON.stringify(qaHistory));
+    }
+    router.push(`/evaluate?index=${questionIndex}`);
   };
 
   return (
@@ -102,6 +106,12 @@ export default function QuestionPage() {
             <Button type="submit" className="text-2xl py-6" disabled={loading || !question}>답변 제출</Button>
           </form>
         </Card>
+      </div>
+      <div className="w-full flex flex-col items-center justify-center py-8 bg-background">
+        <div className="w-full max-w-3xl flex flex-col gap-2">
+          <div className="text-xl font-bold text-center mb-2">진행 상황: {questionIndex + 1} / {totalQuestions}</div>
+          <Progress className="w-full h-6" value={((questionIndex + 1) / totalQuestions) * 100} />
+        </div>
       </div>
     </div>
   );
